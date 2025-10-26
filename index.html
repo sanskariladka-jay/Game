@@ -1,174 +1,366 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Plucking Fruits Game</title>
   <style>
-    body {
+    :root{
+      --canvas-w: 900px;
+      --canvas-h: 560px;
+    }
+
+    html,body {
+      height: 100%;
       margin: 0;
-      overflow: hidden;
-      background: linear-gradient(to bottom, #87CEEB, #98FB98);
       font-family: 'Poppins', sans-serif;
+    }
+
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: linear-gradient(to bottom, #87CEEB, #98FB98);
+      overflow: hidden;
+    }
+
+    .game-wrap {
+      position: relative;
+      width: var(--canvas-w);
+      max-width: 98vw;
+      height: var(--canvas-h);
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      overflow: hidden;
+      background: url('https://i.imgur.com/xLJfK8W.png') no-repeat center top;
+      background-size: cover;
     }
 
     canvas {
       display: block;
-      background: url('https://i.imgur.com/xLJfK8W.png') no-repeat center top;
-      background-size: cover;
+      width: 100%;
+      height: 100%;
+      background: transparent; /* background handled by wrapper */
     }
 
     #scoreBoard {
       position: absolute;
       top: 10px;
-      left: 10px;
-      font-size: 20px;
+      left: 12px;
+      font-size: 18px;
       color: #fff;
-      font-weight: bold;
-      text-shadow: 1px 1px 3px black;
+      font-weight: 700;
+      text-shadow: 1px 1px 3px rgba(0,0,0,0.7);
+      z-index: 20;
+      user-select: none;
     }
 
     #gameOver {
       position: absolute;
       top: 50%;
       left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(0, 0, 0, 0.7);
+      transform: translate(-50%,-50%);
+      background: rgba(0,0,0,0.75);
       color: white;
-      padding: 30px;
+      padding: 28px;
       border-radius: 10px;
-      font-size: 30px;
+      font-size: 22px;
       display: none;
       text-align: center;
+      z-index: 30;
+      width: 80%;
+      max-width: 360px;
+    }
+
+    #finalScore {
+      margin-top: 10px;
+      font-size: 18px;
     }
 
     #restart {
-      margin-top: 15px;
+      margin-top: 16px;
       background: #ff6347;
       color: white;
       border: none;
-      padding: 10px 20px;
-      font-size: 18px;
+      padding: 10px 18px;
+      font-size: 16px;
       border-radius: 8px;
       cursor: pointer;
     }
+    #restart:hover { background: #ff4500; }
 
-    #restart:hover {
-      background: #ff4500;
+    /* small-screen tweaks */
+    @media (max-width: 520px) {
+      :root { --canvas-w: 360px; --canvas-h: 640px; }
+      #scoreBoard { font-size: 16px; left: 8px; }
+      #gameOver { font-size: 18px; padding: 20px; }
     }
   </style>
 </head>
 <body>
-  <canvas id="gameCanvas" width="800" height="500"></canvas>
-  <div id="scoreBoard">Score: 0 | Lives: 3</div>
-  <div id="gameOver">
-    <div>Game Over!</div>
-    <div id="finalScore"></div>
-    <button id="restart">Restart</button>
+  <div class="game-wrap">
+    <canvas id="gameCanvas" width="900" height="560"></canvas>
+    <div id="scoreBoard">Score: 0 | Lives: 3</div>
+    <div id="gameOver" aria-hidden="true">
+      <div style="font-weight:700; font-size:24px;">Game Over!</div>
+      <div id="finalScore"></div>
+      <button id="restart">Restart</button>
+    </div>
   </div>
 
   <script>
-    const canvas = document.getElementById("gameCanvas");
-    const ctx = canvas.getContext("2d");
+    // -------------------------
+    // Config
+    // -------------------------
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
 
-    let basket = { x: 350, y: 440, width: 100, height: 40, speed: 15 };
-    let fruits = [];
-    let score = 0;
-    let lives = 3;
-    let gameRunning = true;
+    const scoreBoard = document.getElementById('scoreBoard');
+    const gameOverPanel = document.getElementById('gameOver');
+    const finalScore = document.getElementById('finalScore');
+    const restartBtn = document.getElementById('restart');
 
-    const fruitImages = [
+    // logical canvas size (keeps drawing crisp while CSS scales it)
+    const WIDTH = canvas.width;
+    const HEIGHT = canvas.height;
+
+    // Basket
+    const basket = {
+      width: 120,
+      height: 36,
+      x: (WIDTH - 120) / 2,
+      y: HEIGHT - 70,
+      speed: 7,
+      vx: 0 // velocity set by keys
+    };
+
+    // Fruits and images
+    const fruitSources = [
       "https://i.imgur.com/Y1VqLqU.png", // apple
       "https://i.imgur.com/HbG1sIT.png", // banana
       "https://i.imgur.com/FnZL3S5.png", // orange
       "https://i.imgur.com/lq1IhLz.png"  // mango
     ];
 
-    const loadedImages = fruitImages.map(src => {
-      const img = new Image();
-      img.src = src;
-      return img;
+    const fruitImgs = [];
+    let imagesLoaded = 0;
+
+    // Preload images
+    fruitSources.forEach(src => {
+      const im = new Image();
+      im.src = src;
+      im.onload = () => { imagesLoaded++; };
+      im.onerror = () => { console.warn('Failed to load', src); imagesLoaded++; };
+      fruitImgs.push(im);
     });
 
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "ArrowLeft") basket.x -= basket.speed;
-      if (e.key === "ArrowRight") basket.x += basket.speed;
-      basket.x = Math.max(0, Math.min(canvas.width - basket.width, basket.x));
-    });
+    // Game state
+    let fruits = [];
+    let score = 0;
+    let lives = 3;
+    let running = true;
 
-    function createFruit() {
-      const randomX = Math.random() * (canvas.width - 40);
-      const randomType = Math.floor(Math.random() * loadedImages.length);
-      fruits.push({ x: randomX, y: 0, size: 40, speed: 3 + Math.random() * 2, img: loadedImages[randomType] });
+    // Spawning
+    let lastSpawn = 0;
+    const spawnInterval = 800; // ms
+
+    // Input
+    const keys = { left: false, right: false };
+
+    // -------------------------
+    // Helpers
+    // -------------------------
+    function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+    function spawnFruit() {
+      const size = 36 + Math.random() * 26; // 36 - 62
+      const x = Math.random() * (WIDTH - size - 10) + 5;
+      const type = Math.floor(Math.random() * fruitImgs.length);
+      const speed = 2 + Math.random() * 3.5; // 2 - 5.5
+      fruits.push({
+        x, y: -size,
+        size,
+        img: fruitImgs[type],
+        speed,
+        type
+      });
     }
 
+    // -------------------------
+    // Drawing
+    // -------------------------
     function drawBasket() {
-      ctx.fillStyle = "#8B4513";
+      // basket body
+      ctx.fillStyle = '#8B4513';
       ctx.fillRect(basket.x, basket.y, basket.width, basket.height);
-      ctx.fillStyle = "#D2691E";
-      ctx.fillRect(basket.x, basket.y + 10, basket.width, 10);
+
+      // basket rim detail
+      ctx.fillStyle = '#D2691E';
+      ctx.fillRect(basket.x, basket.y + 6, basket.width, 8);
+
+      // small shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.15)';
+      ctx.fillRect(basket.x + 6, basket.y + basket.height - 4, basket.width - 12, 4);
     }
 
     function drawFruits() {
-      fruits.forEach(fruit => {
-        ctx.drawImage(fruit.img, fruit.x, fruit.y, fruit.size, fruit.size);
-      });
-    }
-
-    function updateFruits() {
-      fruits.forEach((fruit, i) => {
-        fruit.y += fruit.speed;
-
-        // Check collision with basket
-        if (
-          fruit.y + fruit.size > basket.y &&
-          fruit.x + fruit.size > basket.x &&
-          fruit.x < basket.x + basket.width
-        ) {
-          score++;
-          fruits.splice(i, 1);
-        }
-
-        // Missed fruit
-        if (fruit.y > canvas.height) {
-          lives--;
-          fruits.splice(i, 1);
-          if (lives <= 0) endGame();
+      fruits.forEach(f => {
+        if (f.img && f.img.complete && f.img.naturalWidth !== 0) {
+          ctx.drawImage(f.img, f.x, f.y, f.size, f.size);
+        } else {
+          // fallback: simple circle until image loads
+          ctx.beginPath();
+          ctx.fillStyle = '#ff8c00';
+          ctx.arc(f.x + f.size/2, f.y + f.size/2, f.size/2, 0, Math.PI*2);
+          ctx.fill();
         }
       });
     }
 
-    function updateGame() {
-      if (!gameRunning) return;
+    function drawHUD() {
+      scoreBoard.textContent = `Score: ${score} | Lives: ${lives}`;
+    }
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      drawBasket();
+    // -------------------------
+    // Update & collision
+    // -------------------------
+    function update(delta) {
+      if (!running) return;
+
+      // update basket velocity from keys
+      if (keys.left) basket.vx = -basket.speed;
+      else if (keys.right) basket.vx = basket.speed;
+      else basket.vx = 0;
+
+      basket.x += basket.vx;
+      basket.x = clamp(basket.x, 6, WIDTH - basket.width - 6);
+
+      // spawn new fruit on interval
+      const now = performance.now();
+      if (now - lastSpawn > spawnInterval) {
+        spawnFruit();
+        lastSpawn = now;
+      }
+
+      // move fruits and check collisions (iterate backwards to safely remove)
+      for (let i = fruits.length - 1; i >= 0; i--) {
+        const f = fruits[i];
+        f.y += f.speed;
+
+        // collision check: simple AABB with a bit of leniency
+        const collided = (f.y + f.size >= basket.y) &&
+                         (f.y <= basket.y + basket.height) &&
+                         (f.x + f.size >= basket.x + 6) &&
+                         (f.x <= basket.x + basket.width - 6);
+
+        if (collided) {
+          score += 1;
+          fruits.splice(i, 1);
+          continue;
+        }
+
+        // missed fruit
+        if (f.y > HEIGHT + 50) {
+          fruits.splice(i, 1);
+          lives -= 1;
+          if (lives <= 0) {
+            endGame();
+            return;
+          }
+        }
+      }
+
+      drawHUD();
+    }
+
+    // -------------------------
+    // Game loop
+    // -------------------------
+    let lastFrame = performance.now();
+    function loop(ts) {
+      const delta = ts - lastFrame;
+      lastFrame = ts;
+
+      // clear
+      ctx.clearRect(0, 0, WIDTH, HEIGHT);
+
+      // draw (background image handled by wrapper)
       drawFruits();
-      updateFruits();
+      drawBasket();
 
-      document.getElementById("scoreBoard").textContent = `Score: ${score} | Lives: ${lives}`;
+      update(delta);
 
-      if (Math.random() < 0.03) createFruit(); // Random fruit drop
-
-      requestAnimationFrame(updateGame);
+      if (running) requestAnimationFrame(loop);
     }
 
+    // -------------------------
+    // Input handling
+    // -------------------------
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = true;
+      if (e.key === 'ArrowRight' || e.key === 'd') keys.right = true;
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (e.key === 'ArrowLeft' || e.key === 'a') keys.left = false;
+      if (e.key === 'ArrowRight' || e.key === 'd') keys.right = false;
+    });
+
+    // Mouse move: center basket on x position for quick control
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = WIDTH / rect.width;
+      const x = (e.clientX - rect.left) * scaleX;
+      basket.x = clamp(x - basket.width / 2, 6, WIDTH - basket.width - 6);
+    });
+
+    // Touch support
+    canvas.addEventListener('touchmove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = WIDTH / rect.width;
+      const touch = e.touches[0];
+      if (!touch) return;
+      const x = (touch.clientX - rect.left) * scaleX;
+      basket.x = clamp(x - basket.width / 2, 6, WIDTH - basket.width - 6);
+      e.preventDefault();
+    }, { passive: false });
+
+    // -------------------------
+    // Game over / restart
+    // -------------------------
     function endGame() {
-      gameRunning = false;
-      document.getElementById("gameOver").style.display = "block";
-      document.getElementById("finalScore").textContent = `Final Score: ${score}`;
+      running = false;
+      gameOverPanel.style.display = 'block';
+      gameOverPanel.setAttribute('aria-hidden','false');
+      finalScore.textContent = `Final Score: ${score}`;
     }
 
-    document.getElementById("restart").addEventListener("click", () => {
+    restartBtn.addEventListener('click', () => {
+      // reset state
       score = 0;
       lives = 3;
       fruits = [];
-      gameRunning = true;
-      document.getElementById("gameOver").style.display = "none";
-      updateGame();
+      basket.x = (WIDTH - basket.width) / 2;
+      running = true;
+      gameOverPanel.style.display = 'none';
+      gameOverPanel.setAttribute('aria-hidden','true');
+      lastSpawn = performance.now();
+      lastFrame = performance.now();
+      requestAnimationFrame(loop);
     });
 
-    updateGame();
+    // -------------------------
+    // Start game after a tiny delay to allow images to begin loading
+    // -------------------------
+    lastSpawn = performance.now();
+    requestAnimationFrame(loop);
+
+    // Optional: show console info if images aren't loaded (debug)
+    setTimeout(() => {
+      if (imagesLoaded < fruitImgs.length) {
+        console.info('Images still loading in background — game will still work with placeholder circles until they finish.');
+      }
+    }, 800);
   </script>
 </body>
-</html>\
+</html>
